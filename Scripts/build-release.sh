@@ -20,9 +20,7 @@ xcodebuild archive \
     -scheme "$SCHEME" \
     -configuration Release \
     -archivePath "$BUILD_DIR/$APP_NAME.xcarchive" \
-    -quiet \
-    CODE_SIGN_IDENTITY="-" \
-    CODE_SIGNING_ALLOWED=NO
+    -quiet
 
 APP_PATH="$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$APP_NAME.app"
 

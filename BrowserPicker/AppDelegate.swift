@@ -11,6 +11,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .openSettings,
             object: nil
         )
+        logDetectedBrowsersAndProfiles()
+    }
+
+    private func logDetectedBrowsersAndProfiles() {
+        let browsers = BrowserDetector.detectInstalledBrowsers()
+        print("[BrowserPicker] === Detected \(browsers.count) browser(s) ===")
+
+        for browser in browsers {
+            let profiles = ProfileDetector.detectProfiles(for: browser)
+            print("  \(browser.name) (\(browser.bundleID)) — type: \(browser.type.rawValue)")
+
+            if profiles.isEmpty {
+                print("    (no profiles)")
+            } else {
+                for profile in profiles {
+                    let emailStr = profile.email.map { " <\($0)>" } ?? ""
+                    print("    - \(profile.name)\(emailStr) [dir: \(profile.directoryName)]")
+                }
+            }
+        }
+
+        print("[BrowserPicker] === End browser detection ===")
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

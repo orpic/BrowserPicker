@@ -1,10 +1,3 @@
-//
-//  ContentView.swift
-//  BrowserPicker
-//
-//  Created by shobhit on 11/04/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
@@ -13,9 +6,12 @@ struct ContentView: View {
             Image(systemName: "globe")
                 .imageScale(.large)
                 .foregroundStyle(.tint)
-            Text("Hello, world!")
+            Text("BrowserPicker is running in the menu bar.")
+                .font(.headline)
+            Text("Look for the globe icon in your menu bar.")
+                .foregroundStyle(.secondary)
         }
-        .padding()
+        .padding(40)
     }
 }
 

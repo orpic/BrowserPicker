@@ -3,7 +3,7 @@ xcuserdata/
 *.xcuserstate
 *.xcuserdatad/
 
-# Xcode build
+# Xcode / release build
 build/
 DerivedData/
 *.moved-aside

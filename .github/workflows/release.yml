@@ -1,0 +1,72 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Build Release archive
+        run: |
+          xcodebuild archive \
+            -project BrowserPicker.xcodeproj \
+            -scheme BrowserPicker \
+            -configuration Release \
+            -archivePath build/BrowserPicker.xcarchive \
+            -quiet \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Create DMG
+        run: |
+          APP_PATH="build/BrowserPicker.xcarchive/Products/Applications/BrowserPicker.app"
+          DMG_NAME="BrowserPicker-${{ steps.version.outputs.VERSION }}.dmg"
+
+          create-dmg \
+            --volname "BrowserPicker" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "BrowserPicker.app" 175 190 \
+            --hide-extension "BrowserPicker.app" \
+            --app-drop-link 425 190 \
+            "build/$DMG_NAME" \
+            "$APP_PATH" \
+            || true
+
+          echo "DMG_PATH=build/$DMG_NAME" >> "$GITHUB_ENV"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DMG_PATH }}
+          generate_release_notes: true
+          body: |
+            ## BrowserPicker v${{ steps.version.outputs.VERSION }}
+
+            ### Installation
+            1. Download **${{ env.DMG_NAME }}** below
+            2. Open the DMG and drag BrowserPicker to Applications
+            3. Launch BrowserPicker
+            4. Right-click > Open if macOS shows a security warning (app is not notarized)
+            5. Set as default browser in System Settings > Desktop & Dock

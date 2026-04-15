@@ -3,6 +3,7 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
+    private var onboardingWindow: NSWindow?
     private let panelController = FloatingPanelController()
     private var pendingURL: URL?
 
@@ -18,6 +19,47 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, let url = self.pendingURL else { return }
             URLLauncher.launch(url: url, browser: browser, profile: profile)
             self.pendingURL = nil
+        }
+
+        showOnboardingIfNeeded()
+    }
+
+    private func showOnboardingIfNeeded() {
+        let hasSeenOnboarding = UserDefaults.standard.bool(forKey: "hasSeenOnboarding")
+        guard !hasSeenOnboarding else { return }
+
+        let onboardingView = OnboardingView {
+            UserDefaults.standard.set(true, forKey: "hasSeenOnboarding")
+            self.onboardingWindow?.close()
+            self.onboardingWindow = nil
+        }
+
+        let hostingView = NSHostingView(rootView: onboardingView)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 400),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Welcome to BrowserPicker"
+        window.contentView = hostingView
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.level = .floating
+        window.delegate = self
+
+        onboardingWindow = window
+
+        NSApp.setActivationPolicy(.regular)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                window.level = .normal
+            }
         }
     }
 

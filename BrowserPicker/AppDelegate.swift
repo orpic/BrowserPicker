@@ -3,6 +3,7 @@ import SwiftUI
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
+    private let panelController = FloatingPanelController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -11,34 +12,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             name: .openSettings,
             object: nil
         )
-        logDetectedBrowsersAndProfiles()
-    }
 
-    private func logDetectedBrowsersAndProfiles() {
-        let browsers = BrowserDetector.detectInstalledBrowsers()
-        print("[BrowserPicker] === Detected \(browsers.count) browser(s) ===")
-
-        for browser in browsers {
-            let profiles = ProfileDetector.detectProfiles(for: browser)
-            print("  \(browser.name) (\(browser.bundleID)) — type: \(browser.type.rawValue)")
-
-            if profiles.isEmpty {
-                print("    (no profiles)")
+        panelController.onProfileSelected = { browser, profile in
+            if let profile {
+                print("[BrowserPicker] Selected: \(browser.name) → \(profile.name)")
             } else {
-                for profile in profiles {
-                    let emailStr = profile.email.map { " <\($0)>" } ?? ""
-                    print("    - \(profile.name)\(emailStr) [dir: \(profile.directoryName)]")
-                }
+                print("[BrowserPicker] Selected: \(browser.name) (no profile)")
             }
         }
-
-        print("[BrowserPicker] === End browser detection ===")
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        for url in urls {
-            print("[BrowserPicker] Received URL: \(url.absoluteString)")
+        guard let url = urls.first else { return }
+        print("[BrowserPicker] Received URL: \(url.absoluteString)")
+        showPopup(for: url)
+    }
+
+    private func showPopup(for url: URL) {
+        let browsers = BrowserDetector.detectInstalledBrowsers()
+
+        var profiles: [String: [BrowserProfile]] = [:]
+        for browser in browsers {
+            profiles[browser.bundleID] = ProfileDetector.detectProfiles(for: browser)
         }
+
+        panelController.show(url: url, browsers: browsers, profiles: profiles)
     }
 
     @objc private func handleOpenSettings() {

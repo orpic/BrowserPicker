@@ -4,6 +4,7 @@ import SwiftUI
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private let panelController = FloatingPanelController()
+    private var pendingURL: URL?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NotificationCenter.default.addObserver(
@@ -13,12 +14,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        panelController.onProfileSelected = { browser, profile in
-            if let profile {
-                print("[BrowserPicker] Selected: \(browser.name) → \(profile.name)")
-            } else {
-                print("[BrowserPicker] Selected: \(browser.name) (no profile)")
-            }
+        panelController.onProfileSelected = { [weak self] browser, profile in
+            guard let self, let url = self.pendingURL else { return }
+            URLLauncher.launch(url: url, browser: browser, profile: profile)
+            self.pendingURL = nil
         }
     }
 
@@ -29,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showPopup(for url: URL) {
+        pendingURL = url
         let browsers = BrowserDetector.detectInstalledBrowsers()
 
         var profiles: [String: [BrowserProfile]] = [:]

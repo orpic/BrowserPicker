@@ -37,7 +37,7 @@ Profile detection works for all Chromium-based browsers and Firefox.
 
 ## Building from source
 
-Requires Xcode 26+ and macOS 26+.
+Requires Xcode 26+ and macOS 14+.
 
 ```bash
 # Clone
@@ -50,6 +50,17 @@ open BrowserPicker.xcodeproj
 # Or build a DMG (requires create-dmg: brew install create-dmg)
 ./Scripts/build-release.sh 1.0.0
 ```
+
+## Releasing a new version
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+./Scripts/build-release.sh 1.2.0
+# Upload build/BrowserPicker-1.2.0.dmg to the GitHub Release page
+```
+
+Pushing a tag auto-creates a GitHub Release with changelog generated from commits. Build the DMG locally (signed with your Apple ID) and upload it to the release.
 
 ## License
 

@@ -2,14 +2,15 @@
 // Licensed under a proprietary license. See LICENSE file for details.
 
 import AppKit
+import Foundation
 
 struct URLLauncher {
-    static func launch(url: URL, browser: Browser, profile: BrowserProfile?) {
+    static func launch(url: URL, browser: Browser, profile: BrowserProfile?, incognito: Bool = false) {
         switch browser.type {
         case .chromium:
-            launchChromium(url: url, browser: browser, profile: profile)
+            launchChromium(url: url, browser: browser, profile: profile, incognito: incognito)
         case .firefox:
-            launchFirefox(url: url, browser: browser, profile: profile)
+            launchFirefox(url: url, browser: browser, profile: profile, incognito: incognito)
         case .safari:
             launchSafari(url: url, browser: browser)
         case .unknown:
@@ -17,11 +18,14 @@ struct URLLauncher {
         }
     }
 
-    private static func launchChromium(url: URL, browser: Browser, profile: BrowserProfile?) {
+    private static func launchChromium(url: URL, browser: Browser, profile: BrowserProfile?, incognito: Bool) {
         var args = [String]()
 
         if let profile {
             args.append("--profile-directory=\(profile.directoryName)")
+        }
+        if incognito {
+            args.append("--incognito")
         }
         args.append(url.absoluteString)
 
@@ -31,19 +35,25 @@ struct URLLauncher {
 
         do {
             try task.run()
-            print("[BrowserPicker] Launched: \(browser.name) profile=\(profile?.name ?? "default") url=\(url.absoluteString)")
+            let mode = incognito ? " (incognito)" : ""
+            print("[BrowserPicker] Launched: \(browser.name) profile=\(profile?.name ?? "default")\(mode) url=\(url.absoluteString)")
         } catch {
             print("[BrowserPicker] Failed to launch \(browser.name): \(error)")
         }
     }
 
-    private static func launchFirefox(url: URL, browser: Browser, profile: BrowserProfile?) {
+    private static func launchFirefox(url: URL, browser: Browser, profile: BrowserProfile?, incognito: Bool) {
         var args = ["-a", browser.path.path, "--args"]
 
-        if let profile {
-            args.append(contentsOf: ["-P", profile.name])
+        if incognito {
+            args.append("--private-window")
+            args.append(url.absoluteString)
+        } else {
+            if let profile {
+                args.append(contentsOf: ["-P", profile.name])
+            }
+            args.append(url.absoluteString)
         }
-        args.append(url.absoluteString)
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -51,7 +61,8 @@ struct URLLauncher {
 
         do {
             try task.run()
-            print("[BrowserPicker] Launched: \(browser.name) profile=\(profile?.name ?? "default") url=\(url.absoluteString)")
+            let mode = incognito ? " (private)" : ""
+            print("[BrowserPicker] Launched: \(browser.name) profile=\(profile?.name ?? "default")\(mode) url=\(url.absoluteString)")
         } catch {
             print("[BrowserPicker] Failed to launch \(browser.name): \(error)")
         }

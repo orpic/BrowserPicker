@@ -7,6 +7,8 @@ struct BrowserRowView: View {
     let browser: Browser
     let hasProfiles: Bool
     let isSelected: Bool
+    let isHighlighted: Bool
+    let index: Int
     let onShowProfiles: () -> Void
     let onBrowserClicked: () -> Void
 
@@ -16,6 +18,11 @@ struct BrowserRowView: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 10) {
+                Text("\(index + 1)")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14)
+
                 Image(nsImage: browser.icon)
                     .resizable()
                     .frame(width: 28, height: 28)
@@ -48,7 +55,7 @@ struct BrowserRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(isRowHovered ? Color.primary.opacity(0.06) : Color.clear)
+        .background((isRowHovered || isHighlighted) ? Color.primary.opacity(0.06) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .onHover { hovering in
             isRowHovered = hovering

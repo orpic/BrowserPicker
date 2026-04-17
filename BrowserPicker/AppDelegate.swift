@@ -18,13 +18,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
-        panelController.onProfileSelected = { [weak self] browser, profile in
+        panelController.onProfileSelected = { [weak self] browser, profile, incognito in
             guard let self, let url = self.pendingURL else { return }
-            URLLauncher.launch(url: url, browser: browser, profile: profile)
+            URLLauncher.launch(url: url, browser: browser, profile: profile, incognito: incognito)
+            HistoryService.log(url: url, browser: browser, profile: profile, incognito: incognito)
             self.pendingURL = nil
         }
 
         showOnboardingIfNeeded()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !flag {
+            handleOpenSettings()
+        }
+        return true
     }
 
     private func showOnboardingIfNeeded() {
@@ -67,8 +75,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.first else { return }
-        print("[BrowserPicker] Received URL: \(url.absoluteString)")
+        guard let rawURL = urls.first else { return }
+        print("[BrowserPicker] Received URL: \(rawURL.absoluteString)")
+
+        let url = URLRewriter.rewrite(rawURL)
+
+        if let match = RuleEngine.match(url: url) {
+            let browsers = BrowserDetector.detectInstalledBrowsers()
+            if let browser = browsers.first(where: { $0.bundleID == match.browserBundleID }) {
+                let profile: BrowserProfile?
+                if let profileDir = match.profileDirectory {
+                    profile = ProfileDetector.detectProfiles(for: browser).first { $0.directoryName == profileDir }
+                } else {
+                    profile = nil
+                }
+                print("[BrowserPicker] Rule matched: \(match.rule.pattern) → \(browser.name)")
+                URLLauncher.launch(url: url, browser: browser, profile: profile, incognito: match.incognito)
+                HistoryService.log(url: url, browser: browser, profile: profile, incognito: match.incognito)
+                return
+            }
+        }
+
         showPopup(for: url)
     }
 

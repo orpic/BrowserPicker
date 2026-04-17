@@ -9,26 +9,30 @@ final class FloatingPanelController {
     private var clickMonitor: Any?
     private var dismissObserver: Any?
 
-    var onProfileSelected: ((Browser, BrowserProfile?) -> Void)?
+    var onProfileSelected: ((Browser, BrowserProfile?, Bool) -> Void)?
 
     func show(url: URL, browsers: [Browser], profiles: [String: [BrowserProfile]]) {
         dismiss()
 
+        let keyboardState = PopupKeyboardState()
         let popupView = RouterPopupView(
             url: url,
             browsers: browsers,
             profiles: profiles,
-            onProfileSelected: { [weak self] browser, profile in
-                self?.onProfileSelected?(browser, profile)
+            keyboardState: keyboardState,
+            onProfileSelected: { [weak self] browser, profile, incognito in
+                self?.onProfileSelected?(browser, profile, incognito)
                 self?.dismiss()
             }
         )
 
         let panel = FloatingPanel(contentView: popupView)
+        panel.keyboardState = keyboardState
         self.panel = panel
 
         positionNearMouse(panel)
         panel.makeKeyAndOrderFront(nil)
+        panel.makeKey()
 
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]
@@ -60,6 +64,9 @@ final class FloatingPanelController {
         }
     }
 
+    private static let expandedWidth: CGFloat = 280 + 1 + 240
+    private static let panelWidth: CGFloat = 280
+
     private func positionNearMouse(_ panel: NSPanel) {
         let mouseLocation = NSEvent.mouseLocation
 
@@ -68,13 +75,14 @@ final class FloatingPanelController {
         }) ?? NSScreen.main else { return }
 
         let screenFrame = screen.visibleFrame
-        let panelSize = panel.frame.size
+        let panelHeight = panel.frame.size.height
 
-        var x = mouseLocation.x - panelSize.width / 2
-        var y = mouseLocation.y - panelSize.height / 2
+        var x = mouseLocation.x - Self.panelWidth / 2
+        var y = mouseLocation.y - panelHeight / 2
 
-        x = max(screenFrame.minX + 8, min(x, screenFrame.maxX - panelSize.width - 8))
-        y = max(screenFrame.minY + 8, min(y, screenFrame.maxY - panelSize.height - 8))
+        let maxX = screenFrame.maxX - Self.expandedWidth - 8
+        x = max(screenFrame.minX + 8, min(x, maxX))
+        y = max(screenFrame.minY + 8, min(y, screenFrame.maxY - panelHeight - 8))
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }

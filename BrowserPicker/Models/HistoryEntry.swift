@@ -11,8 +11,20 @@ struct HistoryEntry: Codable, Identifiable {
     var profileName: String?
     var incognito: Bool
     var timestamp: Date
+    /// True if this open was decided automatically by a matching rule.
+    /// False if the user picked the browser/profile from the popup (or
+    /// re-opened the link from history). Optional for backward compatibility
+    /// with history.json files written before this field existed.
+    var viaRule: Bool?
 
-    init(url: String, browserName: String, browserBundleID: String, profileName: String? = nil, incognito: Bool = false) {
+    init(
+        url: String,
+        browserName: String,
+        browserBundleID: String,
+        profileName: String? = nil,
+        incognito: Bool = false,
+        viaRule: Bool = false
+    ) {
         self.id = UUID()
         self.url = url
         self.browserName = browserName
@@ -20,5 +32,6 @@ struct HistoryEntry: Codable, Identifiable {
         self.profileName = profileName
         self.incognito = incognito
         self.timestamp = Date()
+        self.viaRule = viaRule
     }
 }

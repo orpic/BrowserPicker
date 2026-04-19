@@ -7,6 +7,8 @@ struct RouterPopupView: View {
     let url: URL
     let browsers: [Browser]
     let profiles: [String: [BrowserProfile]]
+    let sourceAppBundleID: String?
+    let sourceAppName: String?
     @ObservedObject var keyboardState: PopupKeyboardState
     let onProfileSelected: (Browser, BrowserProfile?, Bool) -> Void
 

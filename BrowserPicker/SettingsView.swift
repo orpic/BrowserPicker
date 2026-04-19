@@ -214,6 +214,8 @@ private struct RulesSettingsTab: View {
 private struct RuleTesterSection: View {
     let rules: [DomainRule]
     @State private var input: String = ""
+    @State private var simulatedSourceAppID: String = ""
+    @State private var sourceApps: [RunningAppOption] = []
     @State private var isExpanded: Bool = false
 
     var body: some View {
@@ -221,6 +223,15 @@ private struct RuleTesterSection: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("https://example.com/path", text: $input)
                     .textFieldStyle(.roundedBorder)
+
+                Picker("Simulate source app", selection: $simulatedSourceAppID) {
+                    Text("None").tag("")
+                    ForEach(sourceApps) { app in
+                        Text(app.name).tag(app.bundleID)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
 
                 if !input.isEmpty {
                     resultView
@@ -234,6 +245,7 @@ private struct RuleTesterSection: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .onAppear { sourceApps = detectRunningSourceApps() }
     }
 
     @ViewBuilder
@@ -242,7 +254,8 @@ private struct RuleTesterSection: View {
         if let url = URL(string: trimmed), url.scheme != nil {
             let trace = URLRewriter.traceRewrite(trimmed)
             let finalURL = URL(string: trace.finalURL) ?? url
-            let match = RuleEngine.match(url: finalURL)
+            let sourceApp: String? = simulatedSourceAppID.isEmpty ? nil : simulatedSourceAppID
+            let match = RuleEngine.match(url: finalURL, sourceAppBundleID: sourceApp)
 
             VStack(alignment: .leading, spacing: 6) {
                 if !trace.steps.isEmpty {

@@ -171,6 +171,10 @@ private struct RulesSettingsTab: View {
                     .onMove(perform: moveRule)
                 }
             }
+
+            Divider()
+
+            RuleTesterSection(rules: rules)
         }
         .onAppear { rules = RuleEngine.loadRules() }
         .sheet(isPresented: $showingAddSheet) {
@@ -204,6 +208,121 @@ private struct RulesSettingsTab: View {
     private func moveRule(from source: IndexSet, to destination: Int) {
         rules.move(fromOffsets: source, toOffset: destination)
         RuleEngine.saveRules(rules)
+    }
+}
+
+private struct RuleTesterSection: View {
+    let rules: [DomainRule]
+    @State private var input: String = ""
+    @State private var isExpanded: Bool = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("https://example.com/path", text: $input)
+                    .textFieldStyle(.roundedBorder)
+
+                if !input.isEmpty {
+                    resultView
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("Test a URL", systemImage: "wand.and.stars")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var resultView: some View {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let url = URL(string: trimmed), url.scheme != nil {
+            let trace = URLRewriter.traceRewrite(trimmed)
+            let finalURL = URL(string: trace.finalURL) ?? url
+            let match = RuleEngine.match(url: finalURL)
+
+            VStack(alignment: .leading, spacing: 6) {
+                if !trace.steps.isEmpty {
+                    rewriteChainView(steps: trace.steps)
+                }
+
+                matchView(finalURL: finalURL, match: match)
+            }
+        } else {
+            Text("Enter a valid URL (including http:// or https://)")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+    }
+
+    @ViewBuilder
+    private func rewriteChainView(steps: [RewriteStep]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Rewrites applied")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("/\(step.rule.pattern)/")
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                    Text(step.after)
+                        .font(.system(.caption, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func matchView(finalURL: URL, match: RuleMatch?) -> some View {
+        if let match = match {
+            let priority = (rules.firstIndex(where: { $0.id == match.rule.id }) ?? -1) + 1
+            let browserName = browserDisplayName(for: match.browserBundleID)
+            let profileName = profileDisplayName(bundleID: match.browserBundleID, directory: match.profileDirectory)
+
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+                Text("Matches rule #\(priority)")
+                    .font(.caption.bold())
+                Text("→ \(browserName)\(profileName.map { " / \($0)" } ?? "")\(match.incognito ? " (incognito)" : "")")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        } else {
+            HStack(spacing: 6) {
+                Image(systemName: "questionmark.circle")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Text("No rule matches — popup would be shown")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func browserDisplayName(for bundleID: String) -> String {
+        if let browser = BrowserDetector.detectInstalledBrowsers().first(where: { $0.bundleID == bundleID }) {
+            return browser.name
+        }
+        return bundleID.components(separatedBy: ".").last ?? bundleID
+    }
+
+    private func profileDisplayName(bundleID: String, directory: String?) -> String? {
+        guard let directory = directory else { return nil }
+        guard let browser = BrowserDetector.detectInstalledBrowsers().first(where: { $0.bundleID == bundleID }) else {
+            return directory
+        }
+        let profiles = ProfileDetector.detectProfiles(for: browser)
+        return profiles.first(where: { $0.directoryName == directory })?.name ?? directory
     }
 }
 

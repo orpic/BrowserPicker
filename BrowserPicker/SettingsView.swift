@@ -592,6 +592,26 @@ private struct AddRewriteRuleSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pattern = ""
     @State private var replacement = ""
+    @State private var sampleURL = ""
+
+    private var regexError: String? {
+        guard !pattern.isEmpty else { return nil }
+        do {
+            _ = try NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private var previewOutput: String? {
+        guard !sampleURL.isEmpty, !pattern.isEmpty, regexError == nil else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(sampleURL.startIndex..., in: sampleURL)
+        return regex.stringByReplacingMatches(in: sampleURL, range: range, withTemplate: replacement)
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -603,9 +623,49 @@ private struct AddRewriteRuleSheet: View {
                 TextField("Replacement", text: $replacement, prompt: Text("e.g. $1"))
             }
 
+            if let error = regexError {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .lineLimit(2)
+                }
+            }
+
             Text("Uses regex with capture groups. $1, $2, etc. reference matched groups.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Try it on a URL")
+                    .font(.caption2.bold())
+                    .foregroundStyle(.secondary)
+                TextField("https://example.com/?utm_source=x", text: $sampleURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+
+                if let output = previewOutput {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                        Text(output)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(output == sampleURL ? .tertiary : .primary)
+                            .lineLimit(2)
+                            .truncationMode(.middle)
+                    }
+                    if output == sampleURL && !sampleURL.isEmpty {
+                        Text("Pattern did not match this URL")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
 
             HStack {
                 Button("Cancel") { dismiss() }
@@ -617,11 +677,11 @@ private struct AddRewriteRuleSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(pattern.isEmpty)
+                .disabled(pattern.isEmpty || regexError != nil)
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 420)
     }
 }
 

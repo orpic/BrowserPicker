@@ -153,7 +153,7 @@ private struct RulesSettingsTab: View {
         }
         .onAppear { rules = RuleEngine.loadRules() }
         .sheet(isPresented: $showingAddSheet) {
-            AddRuleSheet(onSave: { rule in
+            RuleEditorSheet(editingRule: nil, onSave: { rule in
                 rules.append(rule)
                 RuleEngine.saveRules(rules)
             })
@@ -221,7 +221,8 @@ private struct RuleRow: View {
     }
 }
 
-private struct AddRuleSheet: View {
+private struct RuleEditorSheet: View {
+    let editingRule: DomainRule?
     let onSave: (DomainRule) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -233,9 +234,11 @@ private struct AddRuleSheet: View {
     @State private var browsers: [Browser] = []
     @State private var profiles: [BrowserProfile] = []
 
+    private var isEditing: Bool { editingRule != nil }
+
     var body: some View {
         VStack(spacing: 16) {
-            Text("Add Rule")
+            Text(isEditing ? "Edit Rule" : "Add Rule")
                 .font(.headline)
 
             Form {
@@ -257,7 +260,9 @@ private struct AddRuleSheet: View {
                     } else {
                         profiles = []
                     }
-                    selectedProfileDir = ""
+                    if !profiles.contains(where: { $0.directoryName == selectedProfileDir }) {
+                        selectedProfileDir = ""
+                    }
                 }
                 if !profiles.isEmpty {
                     Picker("Profile", selection: $selectedProfileDir) {
@@ -276,13 +281,20 @@ private struct AddRuleSheet: View {
                 Spacer()
                 Button("Save") {
                     let cleanPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let rule = DomainRule(
+                    var rule = editingRule ?? DomainRule(
                         pattern: cleanPattern,
                         matchType: matchType,
                         browserBundleID: selectedBrowserID,
                         profileDirectory: selectedProfileDir.isEmpty ? nil : selectedProfileDir,
                         incognito: incognito
                     )
+                    if isEditing {
+                        rule.pattern = cleanPattern
+                        rule.matchType = matchType
+                        rule.browserBundleID = selectedBrowserID
+                        rule.profileDirectory = selectedProfileDir.isEmpty ? nil : selectedProfileDir
+                        rule.incognito = incognito
+                    }
                     onSave(rule)
                     dismiss()
                 }
@@ -294,6 +306,16 @@ private struct AddRuleSheet: View {
         .frame(width: 380)
         .onAppear {
             browsers = BrowserDetector.detectInstalledBrowsers()
+            if let rule = editingRule {
+                pattern = rule.pattern
+                matchType = rule.matchType
+                selectedBrowserID = rule.browserBundleID
+                selectedProfileDir = rule.profileDirectory ?? ""
+                incognito = rule.incognito
+                if let browser = browsers.first(where: { $0.bundleID == rule.browserBundleID }) {
+                    profiles = ProfileDetector.detectProfiles(for: browser)
+                }
+            }
         }
     }
 }

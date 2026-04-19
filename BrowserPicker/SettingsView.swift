@@ -22,11 +22,15 @@ struct SettingsView: View {
                 .tabItem { Label("Rewrite", systemImage: "arrow.triangle.swap") }
                 .tag(2)
 
+            StatsSettingsTab()
+                .tabItem { Label("Stats", systemImage: "chart.bar") }
+                .tag(3)
+
             HistorySettingsTab()
                 .tabItem { Label("History", systemImage: "clock") }
-                .tag(3)
+                .tag(4)
         }
-        .frame(width: 520, height: 420)
+        .frame(width: 520, height: 460)
     }
 }
 
@@ -947,6 +951,186 @@ private struct AddRewriteRuleSheet: View {
         }
         .padding(20)
         .frame(width: 420)
+    }
+}
+
+private struct StatsSettingsTab: View {
+    @State private var entries: [HistoryEntry] = []
+
+    private var stats: HistoryStats { HistoryStats(entries: entries) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Stats")
+                    .font(.headline)
+
+                if entries.isEmpty {
+                    VStack(spacing: 8) {
+                        Image(systemName: "chart.bar")
+                            .imageScale(.large)
+                            .font(.title)
+                            .foregroundStyle(.tertiary)
+                        Text("No data yet")
+                            .foregroundStyle(.secondary)
+                        Text("Stats are computed from your link history.\nOpen a few links to see them here.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 40)
+                } else {
+                    countersRow
+                    autoRoutedRow
+                    HStack(alignment: .top, spacing: 12) {
+                        topListCard(title: "Top browsers", items: stats.topBrowsers)
+                        topListCard(title: "Top domains", items: stats.topDomains)
+                    }
+                }
+            }
+            .padding(20)
+        }
+        .onAppear { entries = HistoryService.loadHistory() }
+    }
+
+    private var countersRow: some View {
+        HStack(spacing: 12) {
+            counterCard(title: "Total", value: "\(stats.totalCount)")
+            counterCard(title: "This week", value: "\(stats.thisWeekCount)")
+            counterCard(title: "Today", value: "\(stats.todayCount)")
+        }
+    }
+
+    private func counterCard(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title.bold())
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private var autoRoutedRow: some View {
+        let total = max(stats.viaRuleCount + stats.manualCount, 1)
+        let pct = Int((Double(stats.viaRuleCount) / Double(total)) * 100)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Auto-routed by rules", systemImage: "wand.and.rays")
+                    .font(.caption.bold())
+                Spacer()
+                Text("\(pct)% (\(stats.viaRuleCount) of \(total))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(height: 8)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.accentColor)
+                        .frame(width: geo.size.width * CGFloat(stats.viaRuleCount) / CGFloat(total), height: 8)
+                }
+            }
+            .frame(height: 8)
+        }
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func topListCard(title: String, items: [HistoryStats.RankedItem]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+            if items.isEmpty {
+                Text("No data")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            } else {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    HStack(spacing: 6) {
+                        Text("#\(index + 1)")
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 24, alignment: .leading)
+                        Text(item.label)
+                            .font(.caption)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer()
+                        Text("\(item.count)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct HistoryStats {
+    struct RankedItem {
+        let label: String
+        let count: Int
+    }
+
+    let totalCount: Int
+    let todayCount: Int
+    let thisWeekCount: Int
+    let viaRuleCount: Int
+    let manualCount: Int
+    let topBrowsers: [RankedItem]
+    let topDomains: [RankedItem]
+
+    init(entries: [HistoryEntry], topN: Int = 5, now: Date = Date(), calendar: Calendar = .current) {
+        totalCount = entries.count
+
+        let startOfToday = calendar.startOfDay(for: now)
+        let startOfWeek = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? startOfToday
+        todayCount = entries.filter { $0.timestamp >= startOfToday }.count
+        thisWeekCount = entries.filter { $0.timestamp >= startOfWeek }.count
+
+        viaRuleCount = entries.filter { $0.viaRule == true }.count
+        manualCount = totalCount - viaRuleCount
+
+        topBrowsers = Self.rank(entries: entries, key: { entry in
+            if let profile = entry.profileName {
+                return "\(entry.browserName) / \(profile)"
+            }
+            return entry.browserName
+        }, top: topN)
+
+        topDomains = Self.rank(entries: entries, key: { entry in
+            URL(string: entry.url)?.host ?? entry.url
+        }, top: topN)
+    }
+
+    private static func rank(entries: [HistoryEntry], key: (HistoryEntry) -> String, top: Int) -> [RankedItem] {
+        var counts: [String: Int] = [:]
+        for entry in entries {
+            let k = key(entry)
+            counts[k, default: 0] += 1
+        }
+        return counts.map { RankedItem(label: $0.key, count: $0.value) }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+            }
+            .prefix(top)
+            .map { $0 }
     }
 }
 

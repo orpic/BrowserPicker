@@ -18,6 +18,10 @@ struct DomainRule: Codable, Identifiable {
     var incognito: Bool
     var enabled: Bool
     var createdAt: Date
+    /// Optional. When set, the rule only fires if the link came from this app
+    /// (matched against the frontmost app's bundle identifier at URL open time).
+    /// Defaults to nil for backward compatibility with existing rules.json files.
+    var sourceAppBundleID: String?
 
     init(
         pattern: String,
@@ -25,7 +29,8 @@ struct DomainRule: Codable, Identifiable {
         browserBundleID: String,
         profileDirectory: String? = nil,
         incognito: Bool = false,
-        enabled: Bool = true
+        enabled: Bool = true,
+        sourceAppBundleID: String? = nil
     ) {
         self.id = UUID()
         self.pattern = pattern
@@ -35,5 +40,6 @@ struct DomainRule: Codable, Identifiable {
         self.incognito = incognito
         self.enabled = enabled
         self.createdAt = Date()
+        self.sourceAppBundleID = sourceAppBundleID
     }
 }

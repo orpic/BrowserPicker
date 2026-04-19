@@ -21,27 +21,38 @@ struct RuleEngine {
         PersistenceService.save(rules, to: rulesFile)
     }
 
-    static func match(url: URL) -> RuleMatch? {
+    static func match(url: URL, sourceAppBundleID: String? = nil) -> RuleMatch? {
         let rules = loadRules().filter(\.enabled)
         let urlString = url.absoluteString
         let host = url.host?.lowercased() ?? ""
 
-        print("[BrowserPicker] Rule engine: checking \(rules.count) rule(s) against: \(urlString)")
+        print("[BrowserPicker] Rule engine: checking \(rules.count) rule(s) against: \(urlString) (source: \(sourceAppBundleID ?? "unknown"))")
 
         for rule in rules {
-            switch rule.matchType {
-            case .domain:
-                if matchesDomain(host: host, pattern: rule.pattern.lowercased()) {
-                    return RuleMatch(rule: rule, browserBundleID: rule.browserBundleID, profileDirectory: rule.profileDirectory, incognito: rule.incognito)
+            // Source app filter: if the rule specifies a source app, it must match.
+            if let required = rule.sourceAppBundleID, !required.isEmpty {
+                guard let actual = sourceAppBundleID, actual == required else { continue }
+            }
+
+            // URL pattern check. An empty pattern combined with a source app filter
+            // means "match any URL from this app".
+            let trimmedPattern = rule.pattern.trimmingCharacters(in: .whitespaces)
+            let urlMatches: Bool
+            if trimmedPattern.isEmpty {
+                urlMatches = (rule.sourceAppBundleID?.isEmpty == false)
+            } else {
+                switch rule.matchType {
+                case .domain:
+                    urlMatches = matchesDomain(host: host, pattern: trimmedPattern.lowercased())
+                case .glob:
+                    urlMatches = matchesGlob(urlString: urlString, pattern: trimmedPattern)
+                case .regex:
+                    urlMatches = matchesRegex(urlString: urlString, pattern: trimmedPattern)
                 }
-            case .glob:
-                if matchesGlob(urlString: urlString, pattern: rule.pattern) {
-                    return RuleMatch(rule: rule, browserBundleID: rule.browserBundleID, profileDirectory: rule.profileDirectory, incognito: rule.incognito)
-                }
-            case .regex:
-                if matchesRegex(urlString: urlString, pattern: rule.pattern) {
-                    return RuleMatch(rule: rule, browserBundleID: rule.browserBundleID, profileDirectory: rule.profileDirectory, incognito: rule.incognito)
-                }
+            }
+
+            if urlMatches {
+                return RuleMatch(rule: rule, browserBundleID: rule.browserBundleID, profileDirectory: rule.profileDirectory, incognito: rule.incognito)
             }
         }
 

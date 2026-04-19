@@ -145,15 +145,30 @@ private struct RulesSettingsTab: View {
                 }
                 Spacer()
             } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Rules are matched top to bottom. First match wins. Drag to reorder.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.08))
+
                 List {
-                    ForEach(rules) { rule in
+                    ForEach(Array(rules.enumerated()), id: \.element.id) { index, rule in
                         RuleRow(
+                            priority: index + 1,
                             rule: rule,
                             onToggle: { toggleRule(rule) },
                             onEdit: { editingRule = rule },
                             onDelete: { deleteRule(rule) }
                         )
                     }
+                    .onMove(perform: moveRule)
                 }
             }
         }
@@ -185,9 +200,15 @@ private struct RulesSettingsTab: View {
         rules.removeAll { $0.id == rule.id }
         RuleEngine.saveRules(rules)
     }
+
+    private func moveRule(from source: IndexSet, to destination: Int) {
+        rules.move(fromOffsets: source, toOffset: destination)
+        RuleEngine.saveRules(rules)
+    }
 }
 
 private struct RuleRow: View {
+    let priority: Int
     let rule: DomainRule
     let onToggle: () -> Void
     let onEdit: () -> Void
@@ -195,6 +216,11 @@ private struct RuleRow: View {
 
     var body: some View {
         HStack {
+            Text("#\(priority)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .frame(minWidth: 22, alignment: .leading)
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(rule.pattern)

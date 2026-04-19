@@ -112,6 +112,7 @@ private struct GeneralSettingsTab: View {
 private struct RulesSettingsTab: View {
     @State private var rules: [DomainRule] = []
     @State private var showingAddSheet = false
+    @State private var editingRule: DomainRule?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -146,7 +147,12 @@ private struct RulesSettingsTab: View {
             } else {
                 List {
                     ForEach(rules) { rule in
-                        RuleRow(rule: rule, onToggle: { toggleRule(rule) }, onDelete: { deleteRule(rule) })
+                        RuleRow(
+                            rule: rule,
+                            onToggle: { toggleRule(rule) },
+                            onEdit: { editingRule = rule },
+                            onDelete: { deleteRule(rule) }
+                        )
                     }
                 }
             }
@@ -156,6 +162,14 @@ private struct RulesSettingsTab: View {
             RuleEditorSheet(editingRule: nil, onSave: { rule in
                 rules.append(rule)
                 RuleEngine.saveRules(rules)
+            })
+        }
+        .sheet(item: $editingRule) { rule in
+            RuleEditorSheet(editingRule: rule, onSave: { updated in
+                if let index = rules.firstIndex(where: { $0.id == updated.id }) {
+                    rules[index] = updated
+                    RuleEngine.saveRules(rules)
+                }
             })
         }
     }
@@ -176,6 +190,7 @@ private struct RulesSettingsTab: View {
 private struct RuleRow: View {
     let rule: DomainRule
     let onToggle: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -211,13 +226,24 @@ private struct RuleRow: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
 
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Edit rule")
+
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Delete rule")
         }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: onEdit)
     }
 }
 

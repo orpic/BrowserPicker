@@ -953,6 +953,7 @@ private struct AddRewriteRuleSheet: View {
 private struct HistorySettingsTab: View {
     @State private var entries: [HistoryEntry] = []
     @State private var searchText = ""
+    @State private var exportError: String?
 
     private var filteredEntries: [HistoryEntry] {
         if searchText.isEmpty { return entries }
@@ -980,6 +981,9 @@ private struct HistorySettingsTab: View {
                 Text("\(entries.count) entries")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Export…") { exportCSV() }
+                    .controlSize(.small)
+                    .disabled(entries.isEmpty)
                 Button("Clear") {
                     HistoryService.clearHistory()
                     entries = []
@@ -1003,34 +1007,143 @@ private struct HistorySettingsTab: View {
                 Spacer()
             } else {
                 List(filteredEntries) { entry in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.url)
-                            .font(.system(.caption, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        HStack(spacing: 4) {
-                            Text(entry.browserName)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                            if let profile = entry.profileName {
-                                Text("→ \(profile)")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            if entry.incognito {
-                                Image(systemName: "eye.slash")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text(Self.dateFormatter.string(from: entry.timestamp))
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
+                    HistoryRow(entry: entry, onReopen: { reopen(entry) }, onOpenIn: { openInPicker(entry) })
                 }
             }
         }
         .onAppear { entries = HistoryService.loadHistory() }
+        .alert("Export failed", isPresented: Binding(
+            get: { exportError != nil },
+            set: { if !$0 { exportError = nil } }
+        )) {
+            Button("OK") { exportError = nil }
+        } message: {
+            Text(exportError ?? "")
+        }
+    }
+
+    private func reopen(_ entry: HistoryEntry) {
+        guard let url = URL(string: entry.url) else { return }
+        let browsers = BrowserDetector.detectInstalledBrowsers()
+        guard let browser = browsers.first(where: { $0.bundleID == entry.browserBundleID }) else {
+            // Browser is no longer installed — fall back to the picker.
+            openInPicker(entry)
+            return
+        }
+        let profile: BrowserProfile? = {
+            guard let profileName = entry.profileName else { return nil }
+            return ProfileDetector.detectProfiles(for: browser).first { $0.name == profileName }
+        }()
+        URLLauncher.launch(url: url, browser: browser, profile: profile, incognito: entry.incognito)
+        HistoryService.log(url: url, browser: browser, profile: profile, incognito: entry.incognito)
+        entries = HistoryService.loadHistory()
+    }
+
+    private func openInPicker(_ entry: HistoryEntry) {
+        guard let url = URL(string: entry.url) else { return }
+        NotificationCenter.default.post(name: .routeURL, object: nil, userInfo: ["url": url])
+    }
+
+    private func exportCSV() {
+        let panel = NSSavePanel()
+        panel.title = "Export Link History"
+        panel.allowedContentTypes = [.commaSeparatedText]
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        panel.nameFieldStringValue = "browserpicker-history-\(formatter.string(from: Date())).csv"
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        do {
+            let csv = HistoryCSV.build(from: entries)
+            try csv.write(to: destination, atomically: true, encoding: .utf8)
+        } catch {
+            exportError = "Could not write file: \(error.localizedDescription)"
+        }
+    }
+}
+
+private struct HistoryRow: View {
+    let entry: HistoryEntry
+    let onReopen: () -> Void
+    let onOpenIn: () -> Void
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(entry.url)
+                .font(.system(.caption, design: .monospaced))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            HStack(spacing: 4) {
+                Text(entry.browserName)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let profile = entry.profileName {
+                    Text("→ \(profile)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if entry.incognito {
+                    Image(systemName: "eye.slash")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Text(Self.dateFormatter.string(from: entry.timestamp))
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button(action: onReopen) {
+                Label("Re-open in \(entry.browserName)", systemImage: "arrow.clockwise")
+            }
+            Button(action: onOpenIn) {
+                Label("Open in…", systemImage: "questionmark.app")
+            }
+            Divider()
+            Button(action: copyURL) {
+                Label("Copy URL", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    private func copyURL() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(entry.url, forType: .string)
+    }
+}
+
+enum HistoryCSV {
+    static func build(from entries: [HistoryEntry]) -> String {
+        let header = "timestamp,url,browser,profile,incognito"
+        let isoFormatter = ISO8601DateFormatter()
+        let rows = entries.map { entry -> String in
+            let fields = [
+                isoFormatter.string(from: entry.timestamp),
+                entry.url,
+                entry.browserName,
+                entry.profileName ?? "",
+                entry.incognito ? "true" : "false",
+            ]
+            return fields.map(escape).joined(separator: ",")
+        }
+        return ([header] + rows).joined(separator: "\n") + "\n"
+    }
+
+    private static func escape(_ field: String) -> String {
+        let needsQuoting = field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r")
+        if !needsQuoting { return field }
+        let escaped = field.replacingOccurrences(of: "\"", with: "\"\"")
+        return "\"\(escaped)\""
     }
 }

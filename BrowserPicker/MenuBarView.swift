@@ -28,4 +28,8 @@ struct MenuBarView: View {
 
 extension Notification.Name {
     static let openSettings = Notification.Name("BrowserPicker.openSettings")
+    /// Posted with userInfo `["url": URL]` when the user wants the picker
+    /// popup for a URL that didn't come through the system default-browser
+    /// hand-off (e.g., from the History tab's "Open in..." action).
+    static let routeURL = Notification.Name("BrowserPicker.routeURL")
 }

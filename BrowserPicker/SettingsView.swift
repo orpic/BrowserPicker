@@ -112,6 +112,7 @@ private struct GeneralSettingsTab: View {
 private struct RulesSettingsTab: View {
     @State private var rules: [DomainRule] = []
     @State private var showingAddSheet = false
+    @State private var editingRule: DomainRule?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -144,18 +145,46 @@ private struct RulesSettingsTab: View {
                 }
                 Spacer()
             } else {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("Rules are matched top to bottom. First match wins. Drag to reorder.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .background(Color.secondary.opacity(0.08))
+
                 List {
-                    ForEach(rules) { rule in
-                        RuleRow(rule: rule, onToggle: { toggleRule(rule) }, onDelete: { deleteRule(rule) })
+                    ForEach(Array(rules.enumerated()), id: \.element.id) { index, rule in
+                        RuleRow(
+                            priority: index + 1,
+                            rule: rule,
+                            onToggle: { toggleRule(rule) },
+                            onEdit: { editingRule = rule },
+                            onDelete: { deleteRule(rule) }
+                        )
                     }
+                    .onMove(perform: moveRule)
                 }
             }
         }
         .onAppear { rules = RuleEngine.loadRules() }
         .sheet(isPresented: $showingAddSheet) {
-            AddRuleSheet(onSave: { rule in
+            RuleEditorSheet(editingRule: nil, onSave: { rule in
                 rules.append(rule)
                 RuleEngine.saveRules(rules)
+            })
+        }
+        .sheet(item: $editingRule) { rule in
+            RuleEditorSheet(editingRule: rule, onSave: { updated in
+                if let index = rules.firstIndex(where: { $0.id == updated.id }) {
+                    rules[index] = updated
+                    RuleEngine.saveRules(rules)
+                }
             })
         }
     }
@@ -171,15 +200,27 @@ private struct RulesSettingsTab: View {
         rules.removeAll { $0.id == rule.id }
         RuleEngine.saveRules(rules)
     }
+
+    private func moveRule(from source: IndexSet, to destination: Int) {
+        rules.move(fromOffsets: source, toOffset: destination)
+        RuleEngine.saveRules(rules)
+    }
 }
 
 private struct RuleRow: View {
+    let priority: Int
     let rule: DomainRule
     let onToggle: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
 
     var body: some View {
         HStack {
+            Text("#\(priority)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundStyle(.tertiary)
+                .frame(minWidth: 22, alignment: .leading)
+
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(rule.pattern)
@@ -211,17 +252,29 @@ private struct RuleRow: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
 
+            Button(action: onEdit) {
+                Image(systemName: "pencil")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Edit rule")
+
             Button(action: onDelete) {
                 Image(systemName: "trash")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .help("Delete rule")
         }
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2, perform: onEdit)
     }
 }
 
-private struct AddRuleSheet: View {
+private struct RuleEditorSheet: View {
+    let editingRule: DomainRule?
     let onSave: (DomainRule) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -233,9 +286,11 @@ private struct AddRuleSheet: View {
     @State private var browsers: [Browser] = []
     @State private var profiles: [BrowserProfile] = []
 
+    private var isEditing: Bool { editingRule != nil }
+
     var body: some View {
         VStack(spacing: 16) {
-            Text("Add Rule")
+            Text(isEditing ? "Edit Rule" : "Add Rule")
                 .font(.headline)
 
             Form {
@@ -257,7 +312,9 @@ private struct AddRuleSheet: View {
                     } else {
                         profiles = []
                     }
-                    selectedProfileDir = ""
+                    if !profiles.contains(where: { $0.directoryName == selectedProfileDir }) {
+                        selectedProfileDir = ""
+                    }
                 }
                 if !profiles.isEmpty {
                     Picker("Profile", selection: $selectedProfileDir) {
@@ -276,13 +333,20 @@ private struct AddRuleSheet: View {
                 Spacer()
                 Button("Save") {
                     let cleanPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let rule = DomainRule(
+                    var rule = editingRule ?? DomainRule(
                         pattern: cleanPattern,
                         matchType: matchType,
                         browserBundleID: selectedBrowserID,
                         profileDirectory: selectedProfileDir.isEmpty ? nil : selectedProfileDir,
                         incognito: incognito
                     )
+                    if isEditing {
+                        rule.pattern = cleanPattern
+                        rule.matchType = matchType
+                        rule.browserBundleID = selectedBrowserID
+                        rule.profileDirectory = selectedProfileDir.isEmpty ? nil : selectedProfileDir
+                        rule.incognito = incognito
+                    }
                     onSave(rule)
                     dismiss()
                 }
@@ -294,6 +358,16 @@ private struct AddRuleSheet: View {
         .frame(width: 380)
         .onAppear {
             browsers = BrowserDetector.detectInstalledBrowsers()
+            if let rule = editingRule {
+                pattern = rule.pattern
+                matchType = rule.matchType
+                selectedBrowserID = rule.browserBundleID
+                selectedProfileDir = rule.profileDirectory ?? ""
+                incognito = rule.incognito
+                if let browser = browsers.first(where: { $0.bundleID == rule.browserBundleID }) {
+                    profiles = ProfileDetector.detectProfiles(for: browser)
+                }
+            }
         }
     }
 }

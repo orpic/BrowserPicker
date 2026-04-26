@@ -11,7 +11,7 @@ final class FloatingPanelController {
 
     var onProfileSelected: ((Browser, BrowserProfile?, Bool) -> Void)?
 
-    func show(url: URL, browsers: [Browser], profiles: [String: [BrowserProfile]]) {
+    func show(url: URL, browsers: [Browser], profiles: [String: [BrowserProfile]], sourceApp: NSRunningApplication?) {
         dismiss()
 
         let keyboardState = PopupKeyboardState()
@@ -19,6 +19,8 @@ final class FloatingPanelController {
             url: url,
             browsers: browsers,
             profiles: profiles,
+            sourceAppBundleID: sourceApp?.bundleIdentifier,
+            sourceAppName: sourceApp?.localizedName,
             keyboardState: keyboardState,
             onProfileSelected: { [weak self] browser, profile, incognito in
                 self?.onProfileSelected?(browser, profile, incognito)

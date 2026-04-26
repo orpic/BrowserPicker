@@ -101,10 +101,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        showPopup(for: url)
+        showPopup(for: url, sourceApp: sourceApp)
     }
 
-    private func showPopup(for url: URL) {
+    private func showPopup(for url: URL, sourceApp: NSRunningApplication?) {
         pendingURL = url
         let browsers = BrowserDetector.detectInstalledBrowsers()
 
@@ -113,7 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             profiles[browser.bundleID] = ProfileDetector.detectProfiles(for: browser)
         }
 
-        panelController.show(url: url, browsers: browsers, profiles: profiles)
+        panelController.show(url: url, browsers: browsers, profiles: profiles, sourceApp: sourceApp)
     }
 
     @objc private func handleOpenSettings() {

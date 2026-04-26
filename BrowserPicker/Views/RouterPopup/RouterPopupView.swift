@@ -3,10 +3,18 @@
 
 import SwiftUI
 
+enum RememberTarget: String, CaseIterable, Identifiable {
+    case domain
+    case sourceApp
+    var id: String { rawValue }
+}
+
 struct RouterPopupView: View {
     let url: URL
     let browsers: [Browser]
     let profiles: [String: [BrowserProfile]]
+    let sourceAppBundleID: String?
+    let sourceAppName: String?
     @ObservedObject var keyboardState: PopupKeyboardState
     let onProfileSelected: (Browser, BrowserProfile?, Bool) -> Void
 
@@ -15,6 +23,25 @@ struct RouterPopupView: View {
     @State private var highlightedProfileIndex: Int = -1
     @State private var isInProfilePanel: Bool = false
     @State private var incognitoMode: Bool = false
+    @State private var rememberMode: Bool = false
+    @State private var rememberTarget: RememberTarget = .domain
+    @State private var includeSubdomains: Bool = false
+
+    private var domainForURL: String? {
+        url.host?.lowercased()
+    }
+
+    private var rootDomainForURL: String? {
+        guard let host = url.host else { return nil }
+        let parts = host.split(separator: ".")
+        guard parts.count >= 2 else { return host }
+        return parts.suffix(2).joined(separator: ".")
+    }
+
+    private var canRememberForApp: Bool {
+        guard let id = sourceAppBundleID, !id.isEmpty else { return false }
+        return id != Bundle.main.bundleIdentifier
+    }
 
     private var selectedBrowser: Browser? {
         browsers.first { $0.id == selectedBrowserID }
@@ -50,13 +77,60 @@ struct RouterPopupView: View {
         }
     }
 
+    private func launch(browser: Browser, profile: BrowserProfile?) {
+        if rememberMode {
+            saveRememberRule(browser: browser, profile: profile)
+        }
+        onProfileSelected(browser, profile, incognitoMode)
+    }
+
+    private func saveRememberRule(browser: Browser, profile: BrowserProfile?) {
+        var rules = RuleEngine.loadRules()
+
+        let pattern: String
+        let matchType: RuleMatchType
+        let sourceApp: String?
+
+        switch rememberTarget {
+        case .domain:
+            guard let host = domainForURL else { return }
+            pattern = includeSubdomains ? (rootDomainForURL ?? host) : host
+            matchType = .domain
+            sourceApp = nil
+        case .sourceApp:
+            guard canRememberForApp, let appID = sourceAppBundleID else { return }
+            pattern = ""
+            matchType = .domain
+            sourceApp = appID
+        }
+
+        // Conflict: replace any existing rule with the same target
+        // (same source app + same pattern) so users don't end up with duplicates.
+        rules.removeAll { existing in
+            (existing.sourceAppBundleID ?? "") == (sourceApp ?? "") &&
+            existing.pattern.lowercased() == pattern.lowercased()
+        }
+
+        let newRule = DomainRule(
+            pattern: pattern,
+            matchType: matchType,
+            browserBundleID: browser.bundleID,
+            profileDirectory: profile?.directoryName,
+            incognito: incognitoMode,
+            sourceAppBundleID: sourceApp
+        )
+        rules.append(newRule)
+        RuleEngine.saveRules(rules)
+        print("[BrowserPicker] Remembered choice as rule: \(pattern.isEmpty ? "(any URL)" : pattern) → \(browser.name)")
+    }
+
     private func handleKeyAction(_ action: PopupKeyAction) {
         switch action {
         case .selectBrowser(let index):
             if index < browsers.count {
                 highlightedIndex = index
                 isInProfilePanel = false
-                onProfileSelected(browsers[index], nil, incognitoMode)
+                launch(browser: browsers[index], profile: nil)
             }
         case .moveUp:
             if isInProfilePanel {
@@ -92,10 +166,10 @@ struct RouterPopupView: View {
         case .confirm:
             if isInProfilePanel && highlightedProfileIndex >= 0 && highlightedProfileIndex < selectedProfiles.count {
                 if let browser = selectedBrowser {
-                    onProfileSelected(browser, selectedProfiles[highlightedProfileIndex], incognitoMode)
+                    launch(browser: browser, profile: selectedProfiles[highlightedProfileIndex])
                 }
             } else {
-                onProfileSelected(browsers[highlightedIndex], nil, incognitoMode)
+                launch(browser: browsers[highlightedIndex], profile: nil)
             }
         case .copyURL:
             NSPasteboard.general.clearContents()
@@ -109,6 +183,11 @@ struct RouterPopupView: View {
     private var browserList: some View {
         VStack(spacing: 0) {
             urlHeader
+
+            if rememberMode {
+                Divider()
+                rememberStrip
+            }
 
             Divider()
 
@@ -129,7 +208,7 @@ struct RouterPopupView: View {
                             },
                             onBrowserClicked: {
                                 print("[BrowserPicker] Browser clicked: \(browser.name) — using default profile")
-                                onProfileSelected(browser, nil, incognitoMode)
+                                launch(browser: browser, profile: nil)
                             }
                         )
                     }
@@ -169,7 +248,7 @@ struct RouterPopupView: View {
                         ) {
                             if let browser = selectedBrowser {
                                 print("[BrowserPicker] Profile selected: \(browser.name) → \(profile.name)")
-                                onProfileSelected(browser, profile, incognitoMode)
+                                launch(browser: browser, profile: profile)
                             }
                         }
                     }
@@ -206,6 +285,19 @@ struct RouterPopupView: View {
             .help("Incognito mode (i)")
 
             Button(action: {
+                rememberMode.toggle()
+                if rememberMode && !canRememberForApp {
+                    rememberTarget = .domain
+                }
+            }) {
+                Image(systemName: rememberMode ? "bookmark.fill" : "bookmark")
+                    .font(.caption)
+                    .foregroundStyle(rememberMode ? .primary : .tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("Remember next choice as a rule")
+
+            Button(action: {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(url.absoluteString, forType: .string)
                 NotificationCenter.default.post(name: .dismissPopup, object: nil)
@@ -229,6 +321,47 @@ struct RouterPopupView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
+    }
+}
+
+    private var rememberStrip: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "bookmark.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.tint)
+                Text("Save next choice as a rule for")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
+            Picker("", selection: $rememberTarget) {
+                if let host = domainForURL {
+                    Text(includeSubdomains ? "*.\(rootDomainForURL ?? host)" : host).tag(RememberTarget.domain)
+                } else {
+                    Text("This URL").tag(RememberTarget.domain)
+                }
+                if canRememberForApp, let name = sourceAppName {
+                    Text("Links from \(name)").tag(RememberTarget.sourceApp)
+                }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+
+            if rememberTarget == .domain {
+                Toggle(isOn: $includeSubdomains) {
+                    Text("Include all subdomains")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .toggleStyle(.checkbox)
+                .controlSize(.mini)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.accentColor.opacity(0.08))
     }
 }
 

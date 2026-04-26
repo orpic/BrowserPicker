@@ -18,6 +18,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             object: nil
         )
 
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleRouteURL(_:)),
+            name: .routeURL,
+            object: nil
+        )
+
         panelController.onProfileSelected = { [weak self] browser, profile, incognito in
             guard let self, let url = self.pendingURL else { return }
             URLLauncher.launch(url: url, browser: browser, profile: profile, incognito: incognito)
@@ -122,6 +129,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         panelController.show(url: url, browsers: browsers, profiles: profiles, sourceApp: sourceApp)
+    }
+
+    @objc private func handleRouteURL(_ notification: Notification) {
+        guard let url = notification.userInfo?["url"] as? URL else { return }
+        // The user explicitly requested the picker (e.g. from the History tab).
+        // Skip rule matching so they always get to choose.
+        showPopup(for: url, sourceApp: nil)
     }
 
     private func handleConfigFileOpen(_ fileURL: URL) {

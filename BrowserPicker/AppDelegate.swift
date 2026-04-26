@@ -76,6 +76,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let rawURL = urls.first else { return }
+
+        // Handle .browserpicker config files opened from Finder by routing
+        // them to the import flow rather than the URL launcher.
+        if rawURL.isFileURL && rawURL.pathExtension.lowercased() == "browserpicker" {
+            handleConfigFileOpen(rawURL)
+            return
+        }
+
         // Capture the source app synchronously, before any other work — the
         // frontmost app at this moment is almost always the app the user
         // clicked the link in.
@@ -114,6 +122,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         panelController.show(url: url, browsers: browsers, profiles: profiles, sourceApp: sourceApp)
+    }
+
+    private func handleConfigFileOpen(_ fileURL: URL) {
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let package = try ConfigService.decode(data)
+            presentImportPrompt(for: package, sourceFilename: fileURL.lastPathComponent)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Could not import configuration"
+            alert.informativeText = "The file \(fileURL.lastPathComponent) could not be read: \(error.localizedDescription)"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
+
+    private func presentImportPrompt(for package: ConfigPackage, sourceFilename: String) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.messageText = "Import \(sourceFilename)?"
+        var details = "\(package.rules.count) rule(s), \(package.rewrites.count) rewrite(s)"
+        if let history = package.history, !history.isEmpty {
+            details += ", \(history.count) history entries (not applied)"
+        }
+        details += "\nExported from BrowserPicker v\(package.appVersion)."
+        details += "\n\nReplace All wipes your existing rules and rewrites. Merge keeps yours and skips duplicates."
+        alert.informativeText = details
+        alert.addButton(withTitle: "Replace All")
+        alert.addButton(withTitle: "Merge")
+        alert.addButton(withTitle: "Cancel")
+
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            let summary = ConfigService.apply(package, strategy: .replace)
+            showImportSummary(summary, strategy: .replace)
+        case .alertSecondButtonReturn:
+            let summary = ConfigService.apply(package, strategy: .merge)
+            showImportSummary(summary, strategy: .merge)
+        default:
+            break
+        }
+    }
+
+    private func showImportSummary(_ summary: ImportSummary, strategy: ImportStrategy) {
+        let alert = NSAlert()
+        alert.messageText = "Import complete"
+        switch strategy {
+        case .replace:
+            alert.informativeText = "Replaced existing configuration.\nRules: \(summary.rulesAdded), Rewrites: \(summary.rewritesAdded)"
+        case .merge:
+            alert.informativeText = "Merged into existing configuration.\nRules added: \(summary.rulesAdded) (skipped \(summary.rulesSkipped))\nRewrites added: \(summary.rewritesAdded) (skipped \(summary.rewritesSkipped))"
+        }
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func handleOpenSettings() {

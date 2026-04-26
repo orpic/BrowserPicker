@@ -3,6 +3,7 @@
 
 import SwiftUI
 import ServiceManagement
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @State private var selectedTab = 0
@@ -32,18 +33,53 @@ struct SettingsView: View {
 private struct GeneralSettingsTab: View {
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var isDefaultBrowser = false
+    @State private var includeHistoryInExport = false
+    @State private var pendingImport: ConfigPackage?
+    @State private var importErrorMessage: String?
+    @State private var importSummaryMessage: String?
 
     var body: some View {
-        VStack(spacing: 16) {
-            aboutSection
-            Divider()
-            settingsSection
-            Divider()
-            defaultBrowserSection
-            Spacer()
+        ScrollView {
+            VStack(spacing: 16) {
+                aboutSection
+                Divider()
+                settingsSection
+                Divider()
+                defaultBrowserSection
+                Divider()
+                backupSection
+            }
+            .padding(20)
         }
-        .padding(20)
         .onAppear { checkDefaultBrowser() }
+        .sheet(item: Binding(
+            get: { pendingImport.map { ImportSheetPayload(package: $0) } },
+            set: { pendingImport = $0?.package }
+        )) { payload in
+            ImportPreviewSheet(package: payload.package, onApply: { strategy in
+                let summary = ConfigService.apply(payload.package, strategy: strategy)
+                importSummaryMessage = format(summary: summary, strategy: strategy)
+                pendingImport = nil
+            }, onCancel: {
+                pendingImport = nil
+            })
+        }
+        .alert("Import failed", isPresented: Binding(
+            get: { importErrorMessage != nil },
+            set: { if !$0 { importErrorMessage = nil } }
+        )) {
+            Button("OK") { importErrorMessage = nil }
+        } message: {
+            Text(importErrorMessage ?? "")
+        }
+        .alert("Import complete", isPresented: Binding(
+            get: { importSummaryMessage != nil },
+            set: { if !$0 { importSummaryMessage = nil } }
+        )) {
+            Button("OK") { importSummaryMessage = nil }
+        } message: {
+            Text(importSummaryMessage ?? "")
+        }
     }
 
     private var aboutSection: some View {
@@ -106,6 +142,155 @@ private struct GeneralSettingsTab: View {
             let bundleID = Bundle(url: defaultBrowser)?.bundleIdentifier
             isDefaultBrowser = bundleID == Bundle.main.bundleIdentifier
         }
+    }
+
+    private var backupSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backup & Sharing")
+                .font(.headline)
+
+            Text("Export your rules and rewrites to a single file you can back up or share with teammates. Imported rules can replace yours or be merged in.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Toggle(isOn: $includeHistoryInExport) {
+                Text("Include link history in export")
+                    .font(.caption)
+            }
+            .toggleStyle(.checkbox)
+            .controlSize(.small)
+
+            HStack {
+                Button("Export…") {
+                    runExport(includeHistory: includeHistoryInExport)
+                }
+                Button("Import…") {
+                    runImport()
+                }
+                Spacer()
+            }
+        }
+    }
+
+    private func runExport(includeHistory: Bool) {
+        let panel = NSSavePanel()
+        panel.title = "Export BrowserPicker Configuration"
+        panel.allowedContentTypes = [BrowserPickerConfigType.utType]
+        panel.nameFieldStringValue = defaultExportFilename()
+        panel.canCreateDirectories = true
+
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+        do {
+            let package = ConfigService.currentPackage(includeHistory: includeHistory)
+            let data = try ConfigService.encode(package)
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            importErrorMessage = "Could not write file: \(error.localizedDescription)"
+        }
+    }
+
+    private func runImport() {
+        let panel = NSOpenPanel()
+        panel.title = "Import BrowserPicker Configuration"
+        panel.allowedContentTypes = [BrowserPickerConfigType.utType]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let source = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: source)
+            let package = try ConfigService.decode(data)
+            pendingImport = package
+        } catch {
+            importErrorMessage = "Could not read file: \(error.localizedDescription)"
+        }
+    }
+
+    private func defaultExportFilename() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        return "browserpicker-\(formatter.string(from: Date())).browserpicker"
+    }
+
+    private func format(summary: ImportSummary, strategy: ImportStrategy) -> String {
+        var lines: [String] = []
+        switch strategy {
+        case .replace:
+            lines.append("Replaced existing configuration.")
+            lines.append("Rules imported: \(summary.rulesAdded)")
+            lines.append("Rewrites imported: \(summary.rewritesAdded)")
+        case .merge:
+            lines.append("Merged into existing configuration.")
+            lines.append("Rules added: \(summary.rulesAdded) (skipped \(summary.rulesSkipped) duplicates)")
+            lines.append("Rewrites added: \(summary.rewritesAdded) (skipped \(summary.rewritesSkipped) duplicates)")
+        }
+        if summary.historyImported > 0 {
+            lines.append("History entries in package: \(summary.historyImported) (not applied)")
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
+enum BrowserPickerConfigType {
+    static let utType: UTType = UTType(exportedAs: "com.orpic.browserpicker.config", conformingTo: .json)
+}
+
+private struct ImportSheetPayload: Identifiable {
+    let id = UUID()
+    let package: ConfigPackage
+}
+
+private struct ImportPreviewSheet: View {
+    let package: ConfigPackage
+    let onApply: (ImportStrategy) -> Void
+    let onCancel: () -> Void
+
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Import Configuration")
+                .font(.headline)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Label("\(package.rules.count) rule(s)", systemImage: "list.bullet.rectangle")
+                Label("\(package.rewrites.count) rewrite(s)", systemImage: "arrow.triangle.swap")
+                if let history = package.history, !history.isEmpty {
+                    Label("\(history.count) history entries (will not be applied)", systemImage: "clock")
+                        .foregroundStyle(.secondary)
+                }
+                Label("Exported \(Self.dateFormatter.string(from: package.exportedAt)) from v\(package.appVersion)", systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+            }
+            .font(.caption)
+
+            Divider()
+
+            Text("Choose how to apply this configuration:")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Merge") { onApply(.merge) }
+                    .help("Add imported rules to your existing ones, skipping duplicates")
+                Button("Replace All") { onApply(.replace) }
+                    .help("Wipe existing rules and rewrites, then apply the imported configuration")
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 420)
     }
 }
 

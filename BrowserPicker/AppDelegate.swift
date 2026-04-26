@@ -76,11 +76,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let rawURL = urls.first else { return }
-        print("[BrowserPicker] Received URL: \(rawURL.absoluteString)")
+        // Capture the source app synchronously, before any other work — the
+        // frontmost app at this moment is almost always the app the user
+        // clicked the link in.
+        let sourceApp = NSWorkspace.shared.frontmostApplication
+        let sourceAppBundleID = sourceApp?.bundleIdentifier
+        print("[BrowserPicker] Received URL: \(rawURL.absoluteString) from: \(sourceAppBundleID ?? "unknown")")
 
         let url = URLRewriter.rewrite(rawURL)
 
-        if let match = RuleEngine.match(url: url) {
+        if let match = RuleEngine.match(url: url, sourceAppBundleID: sourceAppBundleID) {
             let browsers = BrowserDetector.detectInstalledBrowsers()
             if let browser = browsers.first(where: { $0.bundleID == match.browserBundleID }) {
                 let profile: BrowserProfile?

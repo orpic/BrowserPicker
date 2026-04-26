@@ -214,6 +214,8 @@ private struct RulesSettingsTab: View {
 private struct RuleTesterSection: View {
     let rules: [DomainRule]
     @State private var input: String = ""
+    @State private var simulatedSourceAppID: String = ""
+    @State private var sourceApps: [RunningAppOption] = []
     @State private var isExpanded: Bool = false
 
     var body: some View {
@@ -221,6 +223,15 @@ private struct RuleTesterSection: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("https://example.com/path", text: $input)
                     .textFieldStyle(.roundedBorder)
+
+                Picker("Simulate source app", selection: $simulatedSourceAppID) {
+                    Text("None").tag("")
+                    ForEach(sourceApps) { app in
+                        Text(app.name).tag(app.bundleID)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
 
                 if !input.isEmpty {
                     resultView
@@ -234,6 +245,7 @@ private struct RuleTesterSection: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .onAppear { sourceApps = detectRunningSourceApps() }
     }
 
     @ViewBuilder
@@ -242,7 +254,8 @@ private struct RuleTesterSection: View {
         if let url = URL(string: trimmed), url.scheme != nil {
             let trace = URLRewriter.traceRewrite(trimmed)
             let finalURL = URL(string: trace.finalURL) ?? url
-            let match = RuleEngine.match(url: finalURL)
+            let sourceApp: String? = simulatedSourceAppID.isEmpty ? nil : simulatedSourceAppID
+            let match = RuleEngine.match(url: finalURL, sourceAppBundleID: sourceApp)
 
             VStack(alignment: .leading, spacing: 6) {
                 if !trace.steps.isEmpty {
@@ -342,13 +355,30 @@ private struct RuleRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(rule.pattern)
-                        .font(.system(.callout, design: .monospaced, weight: .medium))
-                    Text("(\(rule.matchType.rawValue))")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                    if rule.pattern.isEmpty {
+                        Text("(any URL)")
+                            .font(.system(.callout, design: .monospaced, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(rule.pattern)
+                            .font(.system(.callout, design: .monospaced, weight: .medium))
+                        Text("(\(rule.matchType.rawValue))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                 }
                 HStack(spacing: 4) {
+                    if let appID = rule.sourceAppBundleID, !appID.isEmpty {
+                        Image(systemName: "app.dashed")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("from \(appID.components(separatedBy: ".").last ?? appID)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("·")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                     Text(rule.browserBundleID.components(separatedBy: ".").last ?? rule.browserBundleID)
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -392,6 +422,24 @@ private struct RuleRow: View {
     }
 }
 
+private struct RunningAppOption: Identifiable, Hashable {
+    let id: String
+    let name: String
+    var bundleID: String { id }
+}
+
+private func detectRunningSourceApps() -> [RunningAppOption] {
+    var seen = Set<String>()
+    let apps: [RunningAppOption] = NSWorkspace.shared.runningApplications.compactMap { app in
+        guard let bundleID = app.bundleIdentifier, app.activationPolicy != .prohibited else { return nil }
+        if seen.contains(bundleID) { return nil }
+        seen.insert(bundleID)
+        let name = app.localizedName ?? bundleID
+        return RunningAppOption(id: bundleID, name: name)
+    }
+    return apps.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+}
+
 private struct RuleEditorSheet: View {
     let editingRule: DomainRule?
     let onSave: (DomainRule) -> Void
@@ -402,10 +450,18 @@ private struct RuleEditorSheet: View {
     @State private var selectedBrowserID = ""
     @State private var selectedProfileDir = ""
     @State private var incognito = false
+    @State private var selectedSourceAppID = ""
     @State private var browsers: [Browser] = []
     @State private var profiles: [BrowserProfile] = []
+    @State private var sourceApps: [RunningAppOption] = []
 
     private var isEditing: Bool { editingRule != nil }
+    private var hasSourceApp: Bool { !selectedSourceAppID.isEmpty }
+    private var canSave: Bool {
+        guard !selectedBrowserID.isEmpty else { return false }
+        // Must have at least a pattern or a source app filter.
+        return !pattern.trimmingCharacters(in: .whitespaces).isEmpty || hasSourceApp
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -413,10 +469,22 @@ private struct RuleEditorSheet: View {
                 .font(.headline)
 
             Form {
-                TextField("Pattern", text: $pattern, prompt: Text("e.g. github.com"))
+                TextField("Pattern", text: $pattern, prompt: Text(hasSourceApp ? "Optional when source app is set" : "e.g. github.com"))
                 Picker("Match type", selection: $matchType) {
                     ForEach(RuleMatchType.allCases, id: \.self) { type in
                         Text(type.rawValue).tag(type)
+                    }
+                }
+                Picker("Source app", selection: $selectedSourceAppID) {
+                    Text("Any").tag("")
+                    if let editing = editingRule,
+                       let bundleID = editing.sourceAppBundleID,
+                       !bundleID.isEmpty,
+                       !sourceApps.contains(where: { $0.bundleID == bundleID }) {
+                        Text("\(bundleID) (not running)").tag(bundleID)
+                    }
+                    ForEach(sourceApps) { app in
+                        Text(app.name).tag(app.bundleID)
                     }
                 }
                 Picker("Browser", selection: $selectedBrowserID) {
@@ -446,18 +514,27 @@ private struct RuleEditorSheet: View {
                 Toggle("Incognito / Private", isOn: $incognito)
             }
 
+            if hasSourceApp {
+                Text("Only links coming from this app will match this rule.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
             HStack {
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
                     let cleanPattern = pattern.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let sourceApp = selectedSourceAppID.isEmpty ? nil : selectedSourceAppID
                     var rule = editingRule ?? DomainRule(
                         pattern: cleanPattern,
                         matchType: matchType,
                         browserBundleID: selectedBrowserID,
                         profileDirectory: selectedProfileDir.isEmpty ? nil : selectedProfileDir,
-                        incognito: incognito
+                        incognito: incognito,
+                        sourceAppBundleID: sourceApp
                     )
                     if isEditing {
                         rule.pattern = cleanPattern
@@ -465,24 +542,27 @@ private struct RuleEditorSheet: View {
                         rule.browserBundleID = selectedBrowserID
                         rule.profileDirectory = selectedProfileDir.isEmpty ? nil : selectedProfileDir
                         rule.incognito = incognito
+                        rule.sourceAppBundleID = sourceApp
                     }
                     onSave(rule)
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(pattern.isEmpty || selectedBrowserID.isEmpty)
+                .disabled(!canSave)
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 420)
         .onAppear {
             browsers = BrowserDetector.detectInstalledBrowsers()
+            sourceApps = detectRunningSourceApps()
             if let rule = editingRule {
                 pattern = rule.pattern
                 matchType = rule.matchType
                 selectedBrowserID = rule.browserBundleID
                 selectedProfileDir = rule.profileDirectory ?? ""
                 incognito = rule.incognito
+                selectedSourceAppID = rule.sourceAppBundleID ?? ""
                 if let browser = browsers.first(where: { $0.bundleID == rule.browserBundleID }) {
                     profiles = ProfileDetector.detectProfiles(for: browser)
                 }

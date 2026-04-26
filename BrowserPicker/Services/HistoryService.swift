@@ -7,7 +7,7 @@ struct HistoryService {
     private static let historyFile = "history.json"
     private static let maxEntries = 500
 
-    static func log(url: URL, browser: Browser, profile: BrowserProfile?, incognito: Bool) {
+    static func log(url: URL, browser: Browser, profile: BrowserProfile?, incognito: Bool, viaRule: Bool = false) {
         var entries = loadHistory()
 
         let entry = HistoryEntry(
@@ -15,7 +15,8 @@ struct HistoryService {
             browserName: browser.name,
             browserBundleID: browser.bundleID,
             profileName: profile?.name,
-            incognito: incognito
+            incognito: incognito,
+            viaRule: viaRule
         )
 
         entries.insert(entry, at: 0)

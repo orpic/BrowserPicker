@@ -111,7 +111,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 print("[BrowserPicker] Rule matched: \(match.rule.pattern) → \(browser.name)")
                 URLLauncher.launch(url: url, browser: browser, profile: profile, incognito: match.incognito)
-                HistoryService.log(url: url, browser: browser, profile: profile, incognito: match.incognito)
+                HistoryService.log(url: url, browser: browser, profile: profile, incognito: match.incognito, viaRule: true)
                 return
             }
         }
